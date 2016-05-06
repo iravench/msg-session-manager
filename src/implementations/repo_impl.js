@@ -10,9 +10,6 @@ const log = logger.child({module: 'repo_impl'})
 const pool = mysql.createPool(config.storage.mysql)
 
 const selectSessionQuery = 'select id, user_id, device_id, policy from session where id=?'
-const insertNewFmRegistrationQuery = 'insert into fm_registration (id, ip, port) values (?, ?, ?)'
-const selectFmRegistrationQuery = 'select id, ip, port from fm_registration where id=?'
-const deleteFmRegistrationQuery = 'delete from fm_registration where id=?'
 
 function handleMySQLError(reject, err, err_msg) {
   log.error(err)
@@ -50,57 +47,6 @@ export default {
           log.debug('session data not found')
           resolve(null)
         }
-
-        connection.release()
-      })
-    })
-  },
-  get_fm_registration: function(id) {
-    let err_msg = 'error querying storage for front machine registration data'
-
-    return mysqlPromise((connection, resolve, reject) => {
-      log.debug('querying front machine registration data by id %s', id)
-      connection.query(selectFmRegistrationQuery, [id], (err, result) => {
-        if (err) return handleMySQLError(reject, err, err_msg)
-
-        if (result.length > 0) {
-          log.debug('front machine registration data by id %s retrieved', id)
-          resolve(result[0])
-        }
-        else {
-          log.debug('front machine registration data by id %s not found', id)
-          resolve(null)
-        }
-
-        connection.release()
-      })
-    })
-  },
-  set_fm_registration: function(id, ip, port) {
-    let err_msg = 'error updating storage for setting front machine registration data'
-
-    return mysqlPromise((connection, resolve, reject) => {
-      log.debug('setting front machine registration data of id %s', id)
-      connection.query(insertNewFmRegistrationQuery, [id, ip, port], (err, result) => {
-        if (err) return handleMySQLError(reject, err, err_msg)
-
-        log.debug('front machine registration data of id %s set', id)
-        resolve()
-
-        connection.release()
-      })
-    })
-  },
-  delete_fm_registration: function(id) {
-    let err_msg = 'error updating storage for deleting front machine registration data'
-
-    return mysqlPromise((connection, resolve, reject) => {
-      log.debug('deleting front machine registration data of id %s', id)
-      connection.query(deleteFmRegistrationQuery, [id], (err, result) => {
-        if (err) return handleMySQLError(reject, err, err_msg)
-
-        log.debug('front machine registration data of id %s deleted', id)
-        resolve()
 
         connection.release()
       })

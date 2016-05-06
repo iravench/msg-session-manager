@@ -30,14 +30,6 @@ export function SessionMissingError(message) {
 SessionMissingError.prototype = Object.create(Error.prototype)
 SessionMissingError.prototype.constructor = SessionMissingError
 
-export function FrontMachineIdInUseError(message) {
-  this.name = 'FrontMachineIdInUseError'
-  this.message = message || 'front machine id in use'
-  this.stack = (new Error(this.message)).stack
-}
-FrontMachineIdInUseError.prototype = Object.create(Error.prototype)
-FrontMachineIdInUseError.prototype.constructor = FrontMachineIdInUseError
-
 export function InvalidTokenError(message) {
   this.name = 'InvalidTokenError'
   this.message = message || 'invalid token'

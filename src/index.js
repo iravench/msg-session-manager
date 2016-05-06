@@ -2,6 +2,7 @@
 
 import http from 'http'
 import express from 'express'
+import Redis from 'ioredis'
 import Primus from 'primus'
 import Mirage from 'mirage'
 import Emitter from 'primus-emitter'
@@ -12,7 +13,7 @@ import logger from './utils/logger'
 import controllers from './controllers'
 import Events from './events'
 
-import fm_register_factory from './fm_register_factory'
+import fm_register_plugin from './plugins/fm_register_plugin'
 import fm_session_factory from './fm_session_factory'
 import fm_token_factory from './fm_token_factory'
 import repo_factory from './repo_factory'
@@ -20,9 +21,14 @@ import repo_impl from './implementations/repo_impl'
 import fm_token_impl from './implementations/fm_token_impl'
 
 const repo = repo_factory({ impl: repo_impl })
-const fm_register = fm_register_factory({ repo: repo })
 const fm_session = fm_session_factory({ repo: repo })
 const fm_token = fm_token_factory({ impl: fm_token_impl })
+const redisOptions = {
+  family: config.storage.redis.family,
+  password: config.storage.redis.password,
+  db: config.storage.redis.db
+}
+const redis = new Redis(config.storage.redis.port, config.storage.redis.host, redisOptions)
 const log = logger.child({module: 'index'})
 
 // init api routes
@@ -36,14 +42,25 @@ app.use('/v1', bodyParser.json(), bodyParser.urlencoded({ extended:true }), apiR
 const server = http.Server(app)
 
 // init primus with engine.io
-const primus = new Primus(server, { transformer: 'engine.io', parser: 'JSON' })
+const primus = new Primus(server, {
+  transformer: 'engine.io',
+  parser: 'JSON',
+  redis: redis,
+  fm: config.fm
+})
+
+// primus global error handler
+primus.on('error', (err) => {
+  log.error(err)
+})
 
 // init primus plugins
 primus.use('mirage', Mirage)    // the mirage plugin has to come first as it takes care of authentication
 primus.use('emitter', Emitter)
+primus.use('fm_register', fm_register_plugin)
 
 // create an event emitter for emitting client auth_success events on this server instance
-const primus_authorized = primus.emits(Events.Auth_Success)
+const primus_authorized = primus.emits(Events.AUTH_SUCCESS)
 
 //
 // setup mirage as an authentication and session provider
@@ -53,14 +70,14 @@ const primus_authorized = primus.emits(Events.Auth_Success)
 // a token should have expiry setting, as well as client information embeded
 //
 // spark.mirage constains above said token upon entering primus.id.validation
-// once authenticated, spark.user will be assigned to an 'user' object computed from incoming token
+// once authenticated, spark.user will be assigned to an user object computed
 primus.id.timeout = config.mirage.timeout
 primus.id.generator((spark, cb) => {
   let err_msg = 'client without token attempting to connect'
   log.warn(err_msg)
   // signal client that the authentication has failed
   // because no token is provided
-  spark.send(Events.Auth_Failure, 'missing token')
+  spark.send(Events.AUTH_FAILURE, 'missing token')
   cb(new Error(err_msg))
 })
 primus.id.validator((spark, cb) => {
@@ -69,7 +86,7 @@ primus.id.validator((spark, cb) => {
       fm_session.auth(spark, decoded_token).then(
         () => {
           // signal client that the authentication is successful
-          spark.send(Events.Auth_Success)
+          spark.send(Events.AUTH_SUCCESS)
           // signal primus that a new spark is authorized
           primus_authorized(spark)
           // end of validation
@@ -78,7 +95,7 @@ primus.id.validator((spark, cb) => {
         (err) => {
           // signal client that the authentication has failed
           // because associated session fails to be activated
-          spark.send(Events.Auth_Failure, err.message)
+          spark.send(Events.AUTH_FAILURE, err.message)
           // end of validation
           cb(err)
         })
@@ -86,7 +103,7 @@ primus.id.validator((spark, cb) => {
     (err) => {
       // signal client that the authentication has failed
       // because provided token could not be verified
-      spark.send(Events.Auth_Failure, err.message)
+      spark.send(Events.AUTH_FAILURE, err.message)
       // end of validation
       cb(err)
     })
@@ -100,7 +117,7 @@ primus.id.validator((spark, cb) => {
 primus.remove('primus.js')
 
 // register handlers for a secured connection
-primus.on(Events.Auth_Success, (spark) => {
+primus.on(Events.AUTH_SUCCESS, (spark) => {
   log.info('client authenticated')
 
   console.log(spark.user)
@@ -148,18 +165,7 @@ primus.on(Events.Auth_Success, (spark) => {
 // should broker accept the fail token in order to assign a new fm?
 
 server.listen(config.port)
-log.info('start listening on port %s', config.port)
-
-// register current front machine instance to available pool
-fm_register.register(config.fm.id, config.fm.ip, config.fm.port).then(
-  () => {
-    log.info('front machine %s registered', config.fm.id)
-  },
-  (err) => {
-    // if not registered, there should not be any socket connections coming in, so just error out
-    log.fatal(err, 'error registering front machine %s', config.fm.id)
-    process.exit(1)
-  });
+log.info('start listening on port %s', config.port);
 
 // trap interrupt signals to perform cleanup before exit
 ['SIGINT','SIGUSR2'].forEach((signal) => {
@@ -171,11 +177,12 @@ fm_register.register(config.fm.id, config.fm.ip, config.fm.port).then(
 // actual cleanup process
 function cleanup() {
   return Promise.all([
-    fm_register.deregister(config.fm.id),
   ]).then(
     () => {
-      log.info('clean up finished, exit process')
-      process.exit()
+      primus.fm_register.release_server(undefined, (err) => {
+        log.info('clean up finished, exit process')
+        process.exit()
+      })
     },
     (err) => {
       //TBD when errors, might want triger some offline cleanup job

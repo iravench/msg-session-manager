@@ -35,7 +35,7 @@ export default {
   },
   storage: {
     redis: {
-      ip: redis_ip,
+      host: redis_ip,
       port: 6379,
       family: 4,
       password: "pink5678",
@@ -54,5 +54,5 @@ export default {
     ip: fm_ip,
     port: fm_port
   },
-  port: 9090
+  port: fm_port
 }
