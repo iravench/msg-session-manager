@@ -1,4 +1,4 @@
-'use strict';
+'use strict'
 
 import jwt from 'jsonwebtoken'
 import logger from '../utils/logger'
@@ -12,7 +12,7 @@ export default {
       return jwt.verify(token, secret, options, (err, decoded_token) => {
         if (err) {
           log.debug(err, 'jwt token verified and decoded')
-          return reject(err);
+          return reject(err)
         }
 
         log.debug('jwt token verified and decoded')

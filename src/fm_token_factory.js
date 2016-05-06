@@ -20,10 +20,9 @@ export default (opts) => {
           return decoded_token
         },
         (err) => {
-          log.warn('invalid token: ' + err.message)
-          //TBD assuming low level error message is sufficient
-          //otherwise, we'll need to handle specific ones
-          throw new InvalidTokenError(err.message)
+          let err_msg = 'invalid token, ' + err.message
+          log.debug(err, err_msg)
+          throw new InvalidTokenError(err_msg)
         })
     }
   }

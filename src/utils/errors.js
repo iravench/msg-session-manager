@@ -22,13 +22,13 @@ export function StorageError(message) {
 StorageError.prototype = Object.create(Error.prototype)
 StorageError.prototype.constructor = StorageError
 
-export function SessionInUseError(message) {
-  this.name = 'SessionInUseError'
-  this.message = message || 'session in use'
+export function SessionMissingError(message) {
+  this.name = 'SessionMissingError'
+  this.message = message || 'session not found'
   this.stack = (new Error(this.message)).stack
 }
-SessionInUseError.prototype = Object.create(Error.prototype)
-SessionInUseError.prototype.constructor = SessionInUseError
+SessionMissingError.prototype = Object.create(Error.prototype)
+SessionMissingError.prototype.constructor = SessionMissingError
 
 export function FrontMachineIdInUseError(message) {
   this.name = 'FrontMachineIdInUseError'
