@@ -4,7 +4,7 @@ import fs from 'fs'
 import path from 'path'
 import logger from '../utils/logger'
 import EventEmitter from 'events'
-import { FM_REGISTERED, FM_UNREGISTERED } from '../events'
+import Events from '../events'
 
 const log = logger.child({module: 'fm_register'})
 
@@ -71,7 +71,7 @@ class Fm_Register extends EventEmitter {
             return register.emit('error', err)
           }
 
-          register.emit(FM_REGISTERED, fm.id)
+          register.emit(Events.FM_REGISTERED, fm.id)
           register.keepAlive()
         })
     })
@@ -100,7 +100,7 @@ class Fm_Register extends EventEmitter {
         return register.emit('error', err)
       }
 
-      register.emit(FM_UNREGISTERED, fm.id)
+      register.emit(Events.FM_UNREGISTERED, fm.id)
 
       clearInterval(register.timer)
       if (cb) cb(err, fm.id)

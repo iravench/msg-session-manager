@@ -54,5 +54,5 @@ export default {
     ip: fm_ip,
     port: fm_port
   },
-  port: fm_port
+  port: 9090
 }

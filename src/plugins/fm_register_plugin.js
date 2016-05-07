@@ -2,7 +2,7 @@
 
 import logger from '../utils/logger'
 import Fm_Register from './fm_register'
-import { FM_REGISTERED, FM_UNREGISTERED } from '../utils/errors'
+import Events from '../events'
 
 const log = logger.child({module: 'fm_register_plugin'})
 
@@ -15,7 +15,7 @@ export default {
     //
     // also proxy these events to the Primus instance
     // so that you can listen on the Primus server instead of the plugin.
-    [FM_REGISTERED, FM_UNREGISTERED, 'error'].forEach((event) => {
+    [Events.FM_REGISTERED, Events.FM_UNREGISTERED, 'error'].forEach((event) => {
       primus.reserved.events[event] = 1
       fm_register.on(event, primus.emits(event))
     })

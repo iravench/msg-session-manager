@@ -49,11 +49,6 @@ const primus = new Primus(server, {
   fm: config.fm
 })
 
-// primus global error handler
-primus.on('error', (err) => {
-  log.error(err)
-})
-
 // init primus plugins
 primus.use('mirage', Mirage)    // the mirage plugin has to come first as it takes care of authentication
 primus.use('emitter', Emitter)
@@ -126,6 +121,19 @@ primus.on(Events.AUTH_SUCCESS, (spark) => {
   spark.on('howdy', (data) => {
     log.info(data)
   })
+})
+
+// primus global error handler
+primus.on('error', (err) => {
+  log.error(err)
+})
+
+primus.on(Events.FM_REGISTERED, (fm_id) => {
+  log.info('front machine %s registered', fm_id)
+})
+
+primus.on(Events.FM_UNREGISTERED, (fm_id) => {
+  log.info('front machine %s unregistered', fm_id)
 })
 
 // during web socket connection authentication process,
