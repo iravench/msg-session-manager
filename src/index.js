@@ -3,6 +3,7 @@
 import http from 'http'
 import express from 'express'
 import Redis from 'ioredis'
+import amqplib from 'amqplib'
 import Primus from 'primus'
 import Mirage from 'mirage'
 import Emitter from 'primus-emitter'
@@ -14,6 +15,7 @@ import controllers from './controllers'
 import Events from './events'
 
 import fm_register_plugin from './plugins/fm_register_plugin'
+import fm_amqp_plugin from './plugins/fm_amqp_plugin'
 import fm_session_factory from './fm_session_factory'
 import fm_token_factory from './fm_token_factory'
 import repo_factory from './repo_factory'
@@ -29,6 +31,7 @@ const redisOptions = {
   db: config.storage.redis.db
 }
 const redis = new Redis(config.storage.redis.port, config.storage.redis.host, redisOptions)
+const amqpConn = amqplib.connect('amqp://' + config.storage.rabbit.host + ':' + config.storage.rabbit.port)
 const log = logger.child({module: 'index'})
 
 // init api routes
@@ -46,6 +49,7 @@ const primus = new Primus(server, {
   transformer: 'engine.io',
   parser: 'JSON',
   redis: redis,
+  amqpConn: amqpConn,
   fm: config.fm
 })
 
@@ -53,6 +57,7 @@ const primus = new Primus(server, {
 primus.use('mirage', Mirage)    // the mirage plugin has to come first as it takes care of authentication
 primus.use('emitter', Emitter)
 primus.use('fm_register', fm_register_plugin)
+primus.use('fm_amqp', fm_amqp_plugin)
 
 // create an event emitter for emitting client auth_success events on this server instance
 const primus_authorized = primus.emits(Events.AUTH_SUCCESS)
@@ -176,10 +181,17 @@ server.listen(config.port)
 log.info('start listening on port %s', config.port);
 
 // trap interrupt signals to perform cleanup before exit
+// TBD clean up these mess...
 ['SIGINT','SIGUSR2'].forEach((signal) => {
   process.on(signal, () => {
     cleanup()
   })
+})
+
+amqpConn.then((conn) => {
+  process.once('SIGINT', () => { conn.close() })
+  process.once('SIGUSR2', () => { conn.close() })
+  process.once('exit', () => { conn.close() })
 })
 
 // actual cleanup process

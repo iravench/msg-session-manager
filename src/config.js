@@ -17,6 +17,7 @@ const fm_ip = process.env.FM_IP || "127.0.0.1"
 const fm_port = process.env.FM_PORT || 9090
 const redis_ip = process.env.REDIS_IP || "192.168.99.100"
 const mysql_ip = process.env.MYSQL_IP || "192.168.99.100"
+const rabbit_ip = process.env.RABBIT_IP || "192.168.99.100"
 
 //TBD should be further customized based on running environment
 export default {
@@ -47,6 +48,10 @@ export default {
       database: "bex-msg",
       user: "pink",
       password: "5678"
+    },
+    rabbit: {
+      host: rabbit_ip,
+      port: 5672
     }
   },
   fm: {

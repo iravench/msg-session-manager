@@ -18,11 +18,11 @@ class Fm_Register extends EventEmitter {
     primus = primus || {}
     options = options || {}
     if (!options.redis) throw new Error('please provide an ioredis connection through options')
-    if (!options.fm && !options.fm.id) throw new Error('please provide fm with a valid id through options')
+    if (!options.fm || !options.fm.id) throw new Error('please provide fm with a valid id through options')
 
     // parse options and set defaults
     this.redis = options.redis
-    this.namespace = (options.namespace || 'mkm:fm_register') + ':'
+    this.namespace = (options.namespace || 'mkm') + ':fm_register:'
     this.interval = options.interval || 5 * 60 * 1000
     this.latency = options.latency || 2000
 
@@ -130,25 +130,33 @@ class Fm_Register extends EventEmitter {
     return this
   }
 
-  setup_conn(spark, cb) {
+  setup_conn(spark, next) {
     log.debug('setting up new connection')
     const register = this
     const redis = this.redis
 
+    if (!spark.mirage || !spark.user) {
+      let err = new Error('connection has not been properly authorized')
+      if (next) return next(err)
+      return register.emit('error', err)
+    }
+
     redis.incr(register.rkeyFmCount, (err) => {
       log.debug('connection %s setup', spark.id)
+      if (next) return next(err)
     })
 
     return this
   }
 
-  release_conn(spark, cb) {
+  release_conn(spark, next) {
     log.debug('releasing disconnecting connection')
     const register = this
     const redis = this.redis
 
     redis.decr(register.rkeyFmCount, (err) => {
       log.debug('connection %s released', spark.id)
+      if (next) return next(err)
     })
 
     return this
