@@ -37,19 +37,19 @@ class Fm_Amqp extends EventEmitter {
       return amqp.emit('error', err)
     }
 
-    //
-    // create a new channel for the spark instance
-    //
-    // upon receiving backend broadcast messages, deliver through spark
-    // the exchange used to broadcast dont have to be durable
-    //
-    amqpConn.then((conn) => {
+    // amqp setup
+    let broadcastOk = amqpConn.then((conn) => {
+      // create a new channel for the spark instance
       return conn.createChannel().then((ch) => {
         // hold on to channel so we can later close it when spark exits
         spark.amqpch = ch
-        // make sure the fanout exchagne exists
+        // make sure the fanout exchagne for broadcast exists
+        // upon receiving backend broadcast messages, deliver through spark
+        // the exchange used to broadcast dont have to be durable
         let ok = ch.assertExchange(amqp.ekeyFanout, 'fanout', { durable: false })
         // make sure the temporary queue exists
+        // the reason of temporary queue is that when this amqp connection closed
+        // these queues get close as well
         ok = ok.then(() => {
           return ch.assertQueue('', {exclusive: true})
         })
@@ -71,10 +71,21 @@ class Fm_Amqp extends EventEmitter {
           log.debug('spark %s connected with exchange %s', spark.id, amqp.ekeyFanout)
         })
       })
-    }).catch((err) => {
-      if (next) return next(err)
-      return amqp.emit('error', err)
     })
+
+    broadcastOk.catch((err) => {
+    })
+
+    Promise.all([
+      broadcastOk
+    ]).then(
+      () => {
+        if (next) next(undefined)
+      },
+      (err) => {
+        if (next) return next(err)
+        return amqp.emit('error', err)
+      })
 
     //
     // after backend message delivered through spark, also send an ack to a confirm exchange
@@ -85,7 +96,6 @@ class Fm_Amqp extends EventEmitter {
     // a report-back-to exchange name, so that each delivery could be distinguished
     //
 
-    if (next) next(undefined)
     return this
   }
 
