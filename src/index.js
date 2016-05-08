@@ -131,6 +131,11 @@ primus.on('error', (err) => {
   log.error(err)
 })
 
+amqpConn.catch((err) => {
+  log.error(err, 'amqp connection failed')
+  process.exit(1)
+})
+
 primus.on(Events.FM_REGISTERED, (fm_id) => {
   log.info('front machine %s registered', fm_id)
 })
