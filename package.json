@@ -7,7 +7,7 @@
     "start": "DEBUG=true nodemon --exec babel-node -- src/index.js | bunyan",
     "test": "mocha --compilers js:babel-core/register --require ./test/test_init.js --recursive ./test",
     "test:watch": "npm run test -- --watch",
-    "compile": "rm -rf lib/ && babel -d lib/ src/"
+    "compile": "rm -rf lib/ && babel -d lib/ src/ && cp src/plugins/*.lua lib/plugins/"
   },
   "author": "Raven Chen",
   "license": "MIT",
