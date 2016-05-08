@@ -38,11 +38,11 @@ class Fm_Amqp extends EventEmitter {
     }
 
     // amqp broadcast channel setup
-    let broadcastOk = amqpConn.then((conn) => {
+    let amqpOk = amqpConn.then((conn) => {
       // create a new channel for the spark instance
-      return conn.createChannel().then((ch) => {
+      let broadcastOk = conn.createChannel().then((ch) => {
         // hold on to channel so we can later close it when spark exits
-        spark.amqpch = ch
+        spark.amqpBroadcastCh = ch
         // make sure the fanout exchagne for broadcast exists
         // upon receiving backend broadcast messages, deliver through spark
         // the exchange used to broadcast dont have to be durable
@@ -56,7 +56,7 @@ class Fm_Amqp extends EventEmitter {
         // bind queue to exchange
         ok = ok.then((qok) => {
           return ch.bindQueue(qok.queue, amqp.ekeyFanout, '').then(() => {
-            return spark.amqpq = qok.queue
+            return spark.amqpBroadcastQ = qok.queue
           })
         })
         // consume backend message and send out to bc via spake
@@ -71,11 +71,11 @@ class Fm_Amqp extends EventEmitter {
           log.debug('spark %s connected with exchange %s', spark.id, amqp.ekeyFanout)
         })
       })
+
+      return Promise.all([broadcastOk])
     })
 
-    Promise.all([
-      broadcastOk
-    ]).then(
+    amqpOk.then(
       () => {
         if (next) next(undefined)
       },
@@ -103,22 +103,22 @@ class Fm_Amqp extends EventEmitter {
     //
     // release the channel assigned to the spark so that related resources could be freed
     //
-    if (spark.amqpch && spark.amqpq) {
+    if (spark.amqpBroadcastCh && spark.amqpBroadcastQ) {
       // unbind queue from exchange
-      let ok = spark.amqpch.unbindQueue(spark.amqpq, amqp.ekeyFanout, '')
+      let ok = spark.amqpBroadcastCh.unbindQueue(spark.amqpBroadcastQ, amqp.ekeyFanout, '')
       // delete queue
       ok = ok.then(() => {
-        return spark.amqpch.deleteQueue(spark.amqpq)
+        return spark.amqpBroadcastCh.deleteQueue(spark.amqpBroadcastQ)
       })
       // close channel
       ok = ok.then(() => {
-        return spark.amqpch.close()
+        return spark.amqpBroadcastCh.close()
       })
 
       ok.then(
         () => {
-          delete spark.amqpq
-          delete spark.amqpch
+          delete spark.amqpBroadcastQ
+          delete spark.amqpBroadcastCh
           log.debug('spark %s disconnected from exchange %s', spark.id, amqp.ekeyFanout)
           if (next) next()
         },
