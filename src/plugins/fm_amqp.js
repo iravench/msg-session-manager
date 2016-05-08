@@ -37,7 +37,7 @@ class Fm_Amqp extends EventEmitter {
       return amqp.emit('error', err)
     }
 
-    // amqp setup
+    // amqp broadcast channel setup
     let broadcastOk = amqpConn.then((conn) => {
       // create a new channel for the spark instance
       return conn.createChannel().then((ch) => {
@@ -71,9 +71,6 @@ class Fm_Amqp extends EventEmitter {
           log.debug('spark %s connected with exchange %s', spark.id, amqp.ekeyFanout)
         })
       })
-    })
-
-    broadcastOk.catch((err) => {
     })
 
     Promise.all([

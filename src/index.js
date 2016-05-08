@@ -118,9 +118,7 @@ primus.remove('primus.js')
 
 // register handlers for a secured connection
 primus.on(Events.AUTH_SUCCESS, (spark) => {
-  log.info('client authenticated')
-
-  console.log(spark.user)
+  log.info({ AuthorizedUser: spark.user }, 'client authenticated')
 
   spark.send('hello', { data: "how are you?" })
   spark.on('howdy', (data) => {
