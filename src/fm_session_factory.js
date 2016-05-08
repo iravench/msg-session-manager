@@ -35,7 +35,7 @@ export default function(opts) {
               log.debug('valid session found')
               // TBD compute user object which represents the session object
               // simply assign the decoded token to it at the moment
-              spark.user = decoded_token
+              spark.user = decoded_token.user
               return resolve()
             } else {
               throw new SessionMissingError('auth error, session not found')
