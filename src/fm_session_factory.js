@@ -14,20 +14,17 @@ export default function(opts) {
       return new Promise((resolve, reject) => {
         // TBD validate the format of decoded token
 
-        // TBD further verify client spark against decoded token
-        log.debug('verifying spark client against decoded token')
         if (!spark.address.ip.includes(decoded_token.conn.ip)) {
           let err_msg = 'auth error, client ip does not match issued token'
           log.warn(err_msg)
           return reject(new Error(err_msg))
         }
         if (decoded_token.fm.id !== config.fm.id) {
-          let err_msg = 'auth error, client attemps to connect un-appointed front machine'
+          let err_msg = 'auth error, client attemps to connect to an un-appointed front machine'
           log.warn(err_msg)
           return reject(new Error(err_msg))
         }
 
-        log.debug('activating session base on decoded token')
         repo.retrieve_session(decoded_token.session.id).then(
           (session) => {
             if (session) {

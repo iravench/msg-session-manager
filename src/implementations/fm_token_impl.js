@@ -8,10 +8,9 @@ const log = logger.child({module: 'fm_token_impl'})
 export default {
   verify: (token, secret, options) => {
     return new Promise((resolve, reject) => {
-      log.debug('verifying jwt token')
       return jwt.verify(token, secret, options, (err, decoded_token) => {
         if (err) {
-          log.debug(err, 'jwt token verified and decoded')
+          log.error(err, 'unable to verify jwt token')
           return reject(err)
         }
 

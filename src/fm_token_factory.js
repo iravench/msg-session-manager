@@ -13,10 +13,9 @@ export default (opts) => {
 
   return {
     verify: (token) => {
-      log.debug('verifying token');
       return impl.verify(token, options.secret, options).then(
         (decoded_token) => {
-          log.debug('token verified and decoded')
+          log.debug('token verified')
           return decoded_token
         },
         (err) => {

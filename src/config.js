@@ -24,6 +24,7 @@ export default {
   env: env,
   debug: debug,
   applicationName: "msg-session-manager",
+  port: 9090,
   mirage: {
     timeout: 3000            // timespan in seconds btw socket connect and authenticate, timeout cause disconnect
   },
@@ -58,6 +59,5 @@ export default {
     id: fm_id,
     ip: fm_ip,
     port: fm_port
-  },
-  port: 9090
+  }
 }
