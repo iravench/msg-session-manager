@@ -60,10 +60,6 @@ class Fm_Amqp extends EventEmitter {
         fanoutOk = Promise.all([qok, fanoutOk]).then(() => {
           return ch.bindQueue(queueName, amqp.ekeyBroadcast, '')
         })
-        // consume backend message and send out to bc via spake
-        fanoutOk = fanoutOk.then(() => {
-          return ch.consume(queueName, msgHandler, { noAck: true })
-        })
 
         // make sure the topic exchagne for personal message exists
         // upon receiving matched backend messages, deliver through spark
@@ -73,12 +69,11 @@ class Fm_Amqp extends EventEmitter {
           let privateRoutingKey = amqp.rkeyPrivate + spark.user.user_id
           return ch.bindQueue(queueName, amqp.ekeyPrivate, privateRoutingKey)
         })
-        // consume backend message and send out to bc via spake
-        topicOk = topicOk.then(() => {
+
+        // consume messages
+        return Promise.all([fanoutOk, topicOk]).then(() => {
           return ch.consume(queueName, msgHandler, { noAck: true })
         })
-
-        return Promise.all([fanoutOk, topicOk])
       })
     })
 
