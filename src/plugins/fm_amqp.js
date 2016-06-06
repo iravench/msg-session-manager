@@ -13,102 +13,73 @@ class Fm_Amqp extends EventEmitter {
     log.debug('initializing primus fm amqp plugin...')
 
     // validate options
-    primus = primus || {}
     options = options || {}
-    if (!options.amqpConn) throw new Error('please provide an amqp connection instance through options')
+    if (!options.amqp) throw new Error('please provide an amqp connection instance through options')
 
     // parse options and set defaults
-    this.amqpConn = options.amqpConn
-    this.namespace = (options.namespace || 'mkm') + '.amqp.'
+    this.amqpConn = options.amqp
+    this.namespace = (options.amqp_namespace || 'mkm') + '.'
 
     // prepare exchange keys
-    this.ekeyFanout = this.namespace + 'ibc.broadcast'
-    this.ekeyTopic = this.namespace + 'ibc.personal'
-    // prepare personal routing key
-    this.rkeyPersonal = this.namespace + 'ibc.personal.'
+    this.ekeyBroadcast = this.namespace + 'ibc.broadcast'
+    this.ekeyPrivate = this.namespace + 'ibc.private'
+    // prepare queue key
+    this.qkey = this.namespace + 'ibc.'
+    // prepare routing key
+    this.rkeyPrivate = this.namespace + 'ibc.private.'
   }
 
   setup_conn(spark, next) {
-    log.debug('setting up new connection')
+    // dont have to verify authorization status here
+    // because mirage plugin will terminate connection
+    // if it's not properly authorized
+
+    log.debug('setting up amqp for new connection')
     const amqp = this
     const amqpConn = this.amqpConn
 
-    if (!spark.mirage || !spark.user) {
-      let err = new Error('connection has not been properly authorized')
-      if (next) return next(err)
-      return amqp.emit('error', err)
+    const msgHandler = (msg) => {
+      const parsedMessage = parseIncoming(msg)
+      if (parsedMessage) spark.send(parsedMessage.category, parsedMessage.content)
     }
 
-    // amqp broadcast channel setup
-    let amqpOk = amqpConn.then((conn) => {
-      // create the broadcast channel for the spark instance
-      let broadcastOk = conn.createChannel().then((ch) => {
-        // hold on to channel so we can later close it when spark exits
-        spark.amqpBroadcastCh = ch
+    const amqpOk = amqpConn.then((conn) => {
+      // create an amqp channel for the spark instance
+      return conn.createChannel().then((ch) => {
+        // hold on to the channel ref so we can later close it during spark exits
+        spark.amqpCh = ch
+
+        // make sure the queue for current login user exists
+        const queueName = amqp.qkey + spark.user.user_id + '.' + spark.user.device_id
+        const qok = ch.assertQueue(queueName, { durable: true })
+
         // make sure the fanout exchagne for broadcast exists
         // upon receiving backend broadcast messages, deliver through spark
-        // the exchange used to broadcast dont have to be durable
-        let ok = ch.assertExchange(amqp.ekeyFanout, 'fanout', { durable: false })
-        // make sure the temporary queue exists
-        // the reason of temporary queue is that when this amqp connection closed
-        // these queues get close as well
-        ok = ok.then(() => {
-          return ch.assertQueue('', {exclusive: true})
-        })
+        let fanoutOk = ch.assertExchange(amqp.ekeyBroadcast, 'fanout', { durable: true })
         // bind queue to exchange
-        ok = ok.then((qok) => {
-          return ch.bindQueue(qok.queue, amqp.ekeyFanout, '').then(() => {
-            return spark.amqpBroadcastQ = qok.queue
-          })
+        fanoutOk = Promise.all([qok, fanoutOk]).then(() => {
+          return ch.bindQueue(queueName, amqp.ekeyBroadcast, '')
         })
         // consume backend message and send out to bc via spake
-        ok = ok.then((queue) => {
-          return ch.consume(queue, (msg) => {
-            if (msg && msg.content)
-              spark.send(Events.MSG_IBC_BROADCAST, msg.content.toString())
-          }, { noAck: true })
+        fanoutOk = fanoutOk.then(() => {
+          return ch.consume(queueName, msgHandler, { noAck: true })
         })
 
-        return ok.then(()=> {
-          log.debug('spark %s connected with exchange %s', spark.id, amqp.ekeyFanout)
-        })
-      })
-
-      // create the personal channel for the spark instance
-      let personalOk = conn.createChannel().then((ch) => {
-        // hold on to channel so we can later close it when spark exits
-        spark.amqpPersonalCh = ch
         // make sure the topic exchagne for personal message exists
         // upon receiving matched backend messages, deliver through spark
-        // the exchange used to personal message dont have to be durable
-        let ok = ch.assertExchange(amqp.ekeyTopic, 'topic', { durable: false })
-        // make sure the temporary queue exists
-        // the reason of temporary queue is that when this amqp connection closed
-        // these queues get close as well
-        ok = ok.then(() => {
-          return ch.assertQueue('', {exclusive: true})
-        })
+        let topicOk = ch.assertExchange(amqp.ekeyPrivate, 'topic', { durable: true })
         // bind queue to exchange
-        ok = ok.then((qok) => {
-          let personalRoutingKey = amqp.rkeyPersonal + spark.user.user_id
-          return ch.bindQueue(qok.queue, amqp.ekeyTopic, personalRoutingKey).then(() => {
-            return spark.amqpPersonalQ = qok.queue
-          })
+        topicOk = Promise.all([qok, topicOk]).then(() => {
+          let privateRoutingKey = amqp.rkeyPrivate + spark.user.user_id
+          return ch.bindQueue(queueName, amqp.ekeyPrivate, privateRoutingKey)
         })
         // consume backend message and send out to bc via spake
-        ok = ok.then((queue) => {
-          return ch.consume(queue, (msg) => {
-            if (msg && msg.content)
-              spark.send(Events.MSG_IBC_PERSONAL, msg.content.toString())
-          }, { noAck: true })
+        topicOk = topicOk.then(() => {
+          return ch.consume(queueName, msgHandler, { noAck: true })
         })
 
-        return ok.then(()=> {
-          log.debug('spark %s connected with exchange %s', spark.id, amqp.ekeyTopic)
-        })
+        return Promise.all([fanoutOk, topicOk])
       })
-
-      return Promise.all([broadcastOk, personalOk])
     })
 
     amqpOk.then(
@@ -132,49 +103,58 @@ class Fm_Amqp extends EventEmitter {
     return this
   }
 
-  release_conn(spark, next) {
-    log.debug('releasing disconnecting connection')
+  release_conn(spark) {
+    // authorized or not, disconnect event will be triggered
+    // so here we only decrease counter when it's a authorized conn
+    if (!spark.mirage || !spark.user) {
+      return this
+    }
+
+    log.debug('releasing amqp for disconnecting connection')
     const amqp = this
 
-    let allOk = []
+    // grab spark references
+    const sparkId = spark.id
+    const ch = spark.amqpCh
 
-    if (spark.amqpBroadcastCh && spark.amqpBroadcastQ)
-      allOk.push(closeChannel(spark.amqpBroadcastCh, amqp.ekeyFanout, spark.amqpBroadcastQ))
+    // setup cleanup
+    let ok = ch ? ch.close() : Promise.resolve()
 
-    if (spark.amqpPersonalCh && spark.amqpPersonalQ)
-      allOk.push(closeChannel(spark.amqpPersonalCh, amqp.ekeyTopic, spark.amqpPersonalQ))
-
-    Promise.all(allOk).then(
-        () => {
-          log.debug('spark %s disconnected from exchange %s and %s', spark.id, amqp.ekeyFanout, amqp.ekeyTopic)
-          delete spark.amqpBroadcastQ
-          delete spark.amqpBroadcastCh
-          delete spark.amqpPersonalQ
-          delete spark.amqpPersonalCh
-          if (next) next()
-        },
-        (err) => {
-          if (next) return next(err)
-          return amqp.emit('error', err)
-        })
+    ok.then(
+      () => {
+        log.debug('spark %s is now disconnected from amqp channel', sparkId)
+      },
+      (err) => {
+        return amqp.emit('error', err)
+      })
 
     return this
   }
 }
 
-// release the channel assigned to the spark
-// so that related resources could be freed
-function closeChannel(channel, exchange, queue) {
-  // unbind queue from exchange
-  let ok = channel.unbindQueue(queue, exchange, '')
-  // delete queue
-  ok = ok.then(() => {
-    return channel.deleteQueue(queue)
-  })
-  // close channel
-  return ok.then(() => {
-    return channel.close()
-  })
+function parseIncoming(msg) {
+  if (msg && msg.content) {
+    let content = msg.content.toString()
+    let headers = msg.properties.headers
+    if (headers && headers.category) {
+      if (headers.category === 'ibc.system') {
+        return { category: Events.IBC_SYSTEM, content: content }
+      }
+      if (headers.category === 'ibc.comment') {
+        return { category: Events.IBC_COMMENT, content: content }
+      }
+      if (headers.category === 'ibc.favourite') {
+        return { category: Events.IBC_FAVOURITE, content: content }
+      }
+      if (headers.category === 'ibc.misc') {
+        return { category: Events.IBC_MISC, content: content }
+      }
+    } else {
+      // when no type header presents, treat it as of type ibc misc message
+      return { category: Events.IBC_MISC, content: content }
+    }
+  }
+  return
 }
 
 export default Fm_Amqp

@@ -2,6 +2,7 @@
 
 import http from 'http'
 import express from 'express'
+import blocked from 'blocked'
 import Redis from 'ioredis'
 import amqplib from 'amqplib'
 import Primus from 'primus'
@@ -21,6 +22,7 @@ import fm_token_factory from './fm_token_factory'
 import repo_factory from './repo_factory'
 import repo_impl from './implementations/repo_impl'
 import fm_token_impl from './implementations/fm_token_impl'
+import setupAuthorizedSpark from './setupAuthorizedSpark'
 
 const repo = repo_factory({ impl: repo_impl })
 const fm_session = fm_session_factory({ repo: repo })
@@ -32,7 +34,7 @@ const redisOptions = {
 }
 const redis = new Redis(config.storage.redis.port, config.storage.redis.host, redisOptions)
 const amqpConn = amqplib.connect('amqp://' + config.storage.rabbit.host + ':' + config.storage.rabbit.port)
-const log = logger.child({module: 'index'})
+const log = logger.child({ module: 'index' })
 
 // init api routes
 const app = express()
@@ -48,19 +50,23 @@ const server = http.Server(app)
 const primus = new Primus(server, {
   transformer: 'engine.io',
   parser: 'JSON',
+  fm: config.fm,
   redis: redis,
-  amqpConn: amqpConn,
-  fm: config.fm
+  amqp: amqpConn,
+  amqp_namespace: config.primus.amqp_namespace,
+  register_namespace: config.primus.register_namespace,
+  register_interval: config.primus.register_interval,
+  register_latency: config.primus.register_latency
 })
 
 // init primus plugins
-primus.use('mirage', Mirage)    // the mirage plugin has to come first as it takes care of authentication
+primus.use('mirage', Mirage)
 primus.use('emitter', Emitter)
 primus.use('fm_register', fm_register_plugin)
 primus.use('fm_amqp', fm_amqp_plugin)
 
-// create an event emitter for emitting client auth_success events on this server instance
-const primus_authorized = primus.emits(Events.AUTH_SUCCESS)
+// an event emitter for emitting auth_success events on the primus server instance
+const emmitSparkAuthorizedEvent = primus.emits(Events.AUTHORIZED)
 
 //
 // setup mirage as an authentication and session provider
@@ -70,40 +76,35 @@ const primus_authorized = primus.emits(Events.AUTH_SUCCESS)
 // a token should have expiry setting, as well as client information embeded
 //
 // spark.mirage constains above said token upon entering primus.id.validation
-// once authenticated, spark.user will be assigned to an user object computed
-primus.id.timeout = config.mirage.timeout
+// once authenticated, spark.user will be assigned with an user object computed
+primus.id.timeout = config.primus.mirage_timeout
 primus.id.generator((spark, cb) => {
   let err_msg = 'client without token attempting to connect'
   log.warn(err_msg)
   // signal client that the authentication has failed
   // because no token is provided
-  spark.send(Events.AUTH_FAILURE, 'missing token')
+  spark.send(Events.UNAUTHORIZED, 'missing token')
   cb(new Error(err_msg))
 })
 primus.id.validator((spark, cb) => {
-  fm_token.verify(spark.mirage).then(
-    (decoded_token) => {
-      fm_session.auth(spark, decoded_token).then(
-        () => {
-          // signal client that the authentication is successful
-          spark.send(Events.AUTH_SUCCESS)
-          // signal primus that a new spark is authorized
-          primus_authorized(spark)
-          // end of validation
-          cb()
-        },
-        (err) => {
-          // signal client that the authentication has failed
-          // because associated session fails to be activated
-          spark.send(Events.AUTH_FAILURE, err.message)
-          // end of validation
-          cb(err)
-        })
+  let ok = fm_token.verify(spark.mirage).then((decoded_token) => {
+    return fm_session.auth(spark, decoded_token)
+  })
+
+  ok = ok.then(
+    () => {
+      // signal client that the authentication is successful
+      spark.send(Events.AUTHORIZED)
+      // signal primus that a new spark is authorized
+      emmitSparkAuthorizedEvent(spark)
+      // end of validation
+      cb()
     },
     (err) => {
       // signal client that the authentication has failed
-      // because provided token could not be verified
-      spark.send(Events.AUTH_FAILURE, err.message)
+      // because associated session fails to be activated
+      // or because provided token could not be verified
+      spark.send(Events.UNAUTHORIZED, err.message)
       // end of validation
       cb(err)
     })
@@ -117,23 +118,15 @@ primus.id.validator((spark, cb) => {
 primus.remove('primus.js')
 
 // register handlers for a secured connection
-primus.on(Events.AUTH_SUCCESS, (spark) => {
-  log.info({ AuthorizedUser: spark.user }, 'client authenticated')
+primus.on(Events.AUTHORIZED, (spark) => {
+  log.debug({ AuthorizedUser: spark.user }, 'client authenticated')
 
-  spark.send('hello', { data: "how are you?" })
-  spark.on('howdy', (data) => {
-    log.info(data)
-  })
+  setupAuthorizedSpark(spark)
 })
 
-// primus global error handler
+// TBD primus global error handler
 primus.on('error', (err) => {
   log.error(err)
-})
-
-amqpConn.catch((err) => {
-  log.error(err, 'amqp connection failed')
-  process.exit(1)
 })
 
 primus.on(Events.FM_REGISTERED, (fm_id) => {
@@ -144,72 +137,39 @@ primus.on(Events.FM_UNREGISTERED, (fm_id) => {
   log.info('front machine %s unregistered', fm_id)
 })
 
-// during web socket connection authentication process,
-// we'll also check the session associated with incoming token
-// if the session is revoked or expired, the authentication fails
-// since we're not touching session data after it gets created,
-// we can apply cache and cache invalidation to it later
-//
-// a primus plugin for connection registration
-// if we use redis, must have predefine query
-// we also need to send serverside messages to a specific user or a group of users or users fit some tags
-// we may also need to know if any of these users are currently online?
-// we also need to know on which fm these users are located? so we can send messages to this fm
-// or we can limit user from logging in multiple times
-//
-// when fm fails, we will need to clean up these information
-//
-// the user_id - spark_id mapping will be recorded,
-// in order to send serverside messages or control protocols
-// these handlers could be placed after authentication success
-//
-// AMQP could be used to establish channels for broadcast/control/user_id specific messaging,
-// since channels across fms will all be receiving these messages,
-// a check and drop strategy will be deployed, if the target not exists, message dropped
-// which means we need another user_id/spark_id mapping, could be in-memory or redis
-//
-// primus metroplex and omega-supreme plugins could be used to deliver messages
-// or used to reflect server load?
-//
-// TBD mysql is too heavy for registering a session imo, and too many places could break
-// TBD activated session's socket_id can be used to push server side messages, or maybe fm_manager_id? specific socket_id should probably be held in that manager's memory
-// TBD activated session's fm_id can be used to identify server load and determine further session allocation. (for broker policy) to gain better performance, we might want to do this on redis, just maintain a record on whenever a socket gets authenticated and disconnected.
-// TBD what if an fm crashes and subsequently we lose all socket connections?
-// some kind of monitor system should be watching this event.
-// when it happens, trigger a redis/mysql session close-up?
-// TBD what happens when client tries to establish socket connection with a failed fm?
-// should broker accept the fail token in order to assign a new fm?
+// TBD any uncaughtException handler
+process.on('uncaughtException', (err) => {
+  log.error(err)
+})
 
+// TBD exit out when amqp connection fails
+amqpConn.catch((err) => {
+  log.error(err, 'amqp connection failed')
+  process.exit(1)
+})
+
+// start listening
 server.listen(config.port)
-log.info('start listening on port %s', config.port);
+log.info('start listening on port %s', config.port)
+
+// issue warnings if eventloop got delayed by more than 200ms
+blocked((ms) => {
+  log.warn('eventloop delayed by %d ms', ms)
+}, { threshold: 200 });
 
 // trap interrupt signals to perform cleanup before exit
-// TBD clean up these mess...
 ['SIGINT','SIGUSR2'].forEach((signal) => {
   process.on(signal, () => {
-    cleanup()
-  })
-})
-
-amqpConn.then((conn) => {
-  process.once('SIGINT', () => { conn.close() })
-  process.once('SIGUSR2', () => { conn.close() })
-  process.once('exit', () => { conn.close() })
-})
-
-// actual cleanup process
-function cleanup() {
-  return Promise.all([
-  ]).then(
-    () => {
+    amqpConn.then((conn) => {
+      conn.close()
       primus.fm_register.release_server(undefined, (err) => {
+        if (err) {
+          log.error(err, 'fm register failed to clean up')
+          process.exit(1)
+        }
         log.info('clean up finished, exit process')
         process.exit()
       })
-    },
-    (err) => {
-      //TBD when errors, might want triger some offline cleanup job
-      log.error('error cleaning up')
-      process.exit(1)
     })
-}
+  })
+})

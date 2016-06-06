@@ -20,13 +20,15 @@ export default {
       fm_register.on(event, primus.emits(event))
     })
 
-    primus.on('connection', (spark, next) => {
+    //primus.on('connection', (spark, next) => {
       // perform necessary setup for a new connection
-      fm_register.setup_conn(spark, next)
-    }).on('disconnection', (spark, next) => {
+      // fm_register.setup_conn(spark, next)
+    //}).on('disconnection', (spark) => {
       // perform necessary resource release for a disconnecting connection
-      fm_register.release_conn(spark, next)
-    }).on('close', (options, next) => {
+      // fm_register.release_conn(spark)
+    //})
+
+    primus.on('close', (options, next) => {
       // perform necessary resource release for a closing fm server
       fm_register.release_server(undefined, next)
     }).server.on('listening', () => {

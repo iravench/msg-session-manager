@@ -9,18 +9,24 @@ const log = logger.child({module: 'fm_token_factory'})
 export default (opts) => {
   const defaults = config.jwt
   const options = Object.assign({}, defaults, opts)
-  const { impl } = options
+  const { impl, secret } = options
+  const signOpts = {
+    algorithm: options.algorithm,
+    audience: options.audience,
+    subject: options.subject,
+    issuer: options.issuer
+  }
 
   return {
     verify: (token) => {
-      return impl.verify(token, options.secret, options).then(
+      return impl.verify(token, secret, signOpts).then(
         (decoded_token) => {
           log.debug('token verified')
           return decoded_token
         },
         (err) => {
           let err_msg = 'invalid token, ' + err.message
-          log.debug(err, err_msg)
+          log.error(err, err_msg)
           throw new InvalidTokenError(err_msg)
         })
     }

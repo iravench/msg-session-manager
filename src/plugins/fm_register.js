@@ -15,16 +15,17 @@ class Fm_Register extends EventEmitter {
     log.debug('initializing primus fm register plugin...')
 
     // validate options
-    primus = primus || {}
+    this.primus = primus
+    if (!primus) throw new Error('please provide a primus server instance')
     options = options || {}
     if (!options.redis) throw new Error('please provide an ioredis connection through options')
     if (!options.fm || !options.fm.id) throw new Error('please provide fm with a valid id through options')
 
     // parse options and set defaults
     this.redis = options.redis
-    this.namespace = (options.namespace || 'mkm') + ':fm_register:'
-    this.interval = options.interval || 5 * 60 * 1000
-    this.latency = options.latency || 2000
+    this.namespace = (options.register_namespace || 'mkm') + ':fm_register:'
+    this.interval = options.register_interval || 5 * 60 * 1000
+    this.latency = options.register_latency || 2000
 
     // define redis annihilate custom command
     let lua = fs.readFileSync(path.join(__dirname, 'fm_register_annihilate.lua'), 'utf8')
@@ -40,13 +41,12 @@ class Fm_Register extends EventEmitter {
     this.rkeyFms = this.namespace + 'fms'
   }
 
-  setup_server(fm, cb) {
+  setup_server(fm) {
     const register = this
     const redis = this.redis
 
     if (!fm && !fm.id) {
       let err = new Error('please provide fm with a valid id')
-      if (cb) return cb(err)
       return register.emit('error', err)
     }
 
@@ -55,19 +55,17 @@ class Fm_Register extends EventEmitter {
     log.debug('cleaning up registration references related to fm server %s', fm.id)
     redis.annihilate(fm.id, (err, result) => {
       if (err) {
-        log.error(err)
-        if (cb) return cb(err)
         return register.emit('error', err)
       }
 
       log.debug('setting up registration references related to fm server %s', fm.id)
       redis.multi()
         .psetex(register.rkeyFmKeepAlive, register.interval, Date.now())
+        .set(register.rkeyFmCount, 0)
         .sadd(register.rkeyFms, fm.id)
         .hmset(register.rkeyFm, 'id', fm.id, 'ip', fm.ip, 'port', fm.port)
         .exec((err) => {
           if (err) {
-            if (cb) return cb(err)
             return register.emit('error', err)
           }
 
@@ -88,7 +86,7 @@ class Fm_Register extends EventEmitter {
 
     fm = fm || register.fm
     if (!fm) {
-      if (cb) cb()
+      if (cb) process.nextTick(cb)
       return this
     }
 
@@ -131,32 +129,38 @@ class Fm_Register extends EventEmitter {
   }
 
   setup_conn(spark, next) {
-    log.debug('setting up new connection')
+    // dont have to verify authorization status here
+    // because mirage plugin will terminate connection
+    // if it's not properly authorized
+
+    log.debug('setting up registration for new connection')
     const register = this
     const redis = this.redis
 
-    if (!spark.mirage || !spark.user) {
-      let err = new Error('connection has not been properly authorized')
-      if (next) return next(err)
-      return register.emit('error', err)
-    }
-
     redis.incr(register.rkeyFmCount, (err) => {
-      log.debug('connection %s setup', spark.id)
+      log.debug('connection %s has been setup', spark.id)
       if (next) return next(err)
     })
 
     return this
   }
 
-  release_conn(spark, next) {
-    log.debug('releasing disconnecting connection')
+  release_conn(spark) {
+    // authorized or not, disconnect event will be triggered
+    // so here we only decrease counter when it's a authorized conn
+    if (!spark.mirage || !spark.user) {
+      return this
+    }
+
+    log.debug('removing registration for disconnecting connection')
     const register = this
     const redis = this.redis
 
+    // grab spark references
+    const sparkId = spark.id
+
     redis.decr(register.rkeyFmCount, (err) => {
-      log.debug('connection %s released', spark.id)
-      if (next) return next(err)
+      log.debug('connection %s released', sparkId)
     })
 
     return this
@@ -171,8 +175,15 @@ class Fm_Register extends EventEmitter {
     clearInterval(this.timer)
 
     this.timer = setInterval(() => {
-      log.debug('refresh fm server %s keep alive', register.fm.id)
-      redis.psetex(register.rkeyFmKeepAlive, register.interval, Date.now())
+      log.debug('refreshing fm server %s keep alive', register.fm.id)
+      redis.multi()
+        .psetex(register.rkeyFmKeepAlive, register.interval, Date.now())
+        .set(register.rkeyFmCount, register.primus.connected)
+        .exec((err) => {
+          if (err) {
+            return register.emit('error', err)
+          }
+        })
 
       // if I ever go down, my brother will help clear up my mess
       register.fms(false, (err, other_fms) => {

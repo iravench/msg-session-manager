@@ -1,10 +1,12 @@
 'use strict'
 
 export default {
-  AUTH_SUCCESS: "mkm::auth::1",
-  AUTH_FAILURE: "mkm::auth::0",
-  FM_REGISTERED: "mkm::fm::register::1",
-  FM_UNREGISTERED: "mkm::fm::register::0",
-  MSG_IBC_BROADCAST: "mkm::msg::ibc::broadcast",
-  MSG_IBC_PERSONAL: "mkm::msg::ibc::personal",
+  FM_REGISTERED: "mkm::fm::registered",
+  FM_UNREGISTERED: "mkm::fm::unregistered",
+  AUTHORIZED: "mkm::authorized",
+  UNAUTHORIZED: "mkm::unauthorized",
+  IBC_SYSTEM: "mkm::ibc::system",
+  IBC_COMMENT: "mkm::ibc::comment",
+  IBC_FAVOURITE: "mkm::ibc::favourite",
+  IBC_MISC: "mkm::ibc::misc",
 }

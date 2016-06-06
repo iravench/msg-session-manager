@@ -12,9 +12,9 @@ export default {
     primus.on('connection', (spark, next) => {
       // perform necessary setup for a new connection
       fm_amqp.setup_conn(spark, next)
-    }).on('disconnection', (spark, next) => {
+    }).on('disconnection', (spark) => {
       // perform necessary resource release for a disconnecting connection
-      fm_amqp.release_conn(spark, next)
+      fm_amqp.release_conn(spark)
     })
   }
 }
